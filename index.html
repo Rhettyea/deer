@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>First-Person Ultimate Hunter</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #111;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        #game-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            max-width: 1024px;
+            max-height: 576px;
+            margin: auto;
+            aspect-ratio: 16/9;
+            background: linear-gradient(to bottom, #87CEEB, #E0F6FF);
+            overflow: hidden;
+            border: 4px solid #333;
+        }
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+            cursor: crosshair;
+        }
+        /* UI Overlays */
+        .hud {
+            position: absolute;
+            color: white;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            pointer-events: none;
+            z-index: 10;
+        }
+        #stats-hud { top: 10px; left: 15px; font-size: 18px; line-height: 1.4; }
+        #gun-hud { bottom: 10px; left: 15px; font-size: 16px; }
+        #prompt-hud { 
+            top: 40%; left: 50%; 
+            transform: translate(-50%, -50%); 
+            font-size: 24px; text-align: center; 
+            color: #ffeb3b;
+            transition: opacity 0.2s;
+        }
+
+        /* Mobile Controls */
+        .mobile-btn {
+            position: absolute;
+            width: 70px;
+            height: 70px;
+            background: rgba(255, 255, 255, 0.25);
+            border: 3px solid rgba(255, 255, 255, 0.6);
+            border-radius: 50%;
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 20;
+            touch-action: manipulation;
+        }
+        #mobile-scope-btn {
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        #mobile-shoot-btn {
+            left: 20px;
+            bottom: 30px;
+            background: rgba(255, 0, 0, 0.3);
+            border-color: rgba(255, 0, 0, 0.6);
+        }
+        /* Scope SVG Icon */
+        .scope-icon {
+            width: 40px;
+            height: 40px;
+            border: 3px solid white;
+            border-radius: 50%;
+            position: relative;
+        }
+        .scope-icon::before, .scope-icon::after {
+            content: '';
+            position: absolute;
+            background: white;
+        }
+        .scope-icon::before { width: 100%; height: 2px; top: 50%; left: 0; transform: translateY(-50%); }
+        .scope-icon::after { height: 100%; width: 2px; left: 50%; top: 0; transform: translateX(-50%); }
+
+        /* Bullet Icon for mobile shoot */
+        .bullet-icon {
+            width: 15px;
+            height: 30px;
+            background: gold;
+            border-radius: 4px 4px 0 0;
+        }
+
+        /* Shop System Layout */
+        #shop-toggle {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            padding: 8px 16px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            z-index: 30;
+        }
+        #shop-modal {
+            position: absolute;
+            top: 10%; left: 10%; right: 10%; bottom: 10%;
+            background: rgba(20, 30, 20, 0.95);
+            border: 3px solid #4CAF50;
+            border-radius: 8px;
+            display: none;
+            flex-direction: column;
+            z-index: 40;
+            color: white;
+            padding: 15px;
+        }
+        #shop-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        #shop-items {
+            flex: 1;
+            overflow-y: auto;
+            margin-top: 10px;
+            padding-right: 5px;
+        }
+        .shop-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(255,255,255,0.1);
+            margin: 6px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .shop-item.owned { border-left: 5px solid #4CAF50; }
+        .shop-item.equipped { background: rgba(76, 175, 80, 0.3); border-left: 5px solid #2196F3; }
+        .shop-item button {
+            padding: 6px 12px;
+            background: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .shop-item button.buy-btn { background: #4CAF50; }
+        .shop-item button:disabled { background: #555; cursor: not-allowed; }
+
+        /* Detection layout trigger for touch devices */
+        @media (pointer: coarse) {
+            .mobile-btn { display: flex; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas" width="1024" height="576"></canvas>
+    
+    <div id="stats-hud" class="hud">
+        Money: $<span id="hud-money">0</span><br>
+        Kills: <span id="hud-kills">0</span>
+    </div>
+    <div id="gun-hud" class="hud">
+        Current Weapon: <span id="hud-gun-name">Starter Rifle</span><br>
+        Bullet Size: <span id="hud-gun-hitbox">1.0x</span> (Easier hit)<br>
+        <span style="font-size:12px; opacity:0.8;">Press 'R' or Right Button to Scope</span>
+    </div>
+    <div id="prompt-hud" class="hud"></div>
+
+    <button id="shop-toggle">SHOP (50+ GUNS)</button>
+
+    <div id="mobile-scope-btn" class="mobile-btn"><div class="scope-icon"></div></div>
+    <div id="mobile-shoot-btn" class="mobile-btn"><div class="bullet-icon"></div></div>
+
+    <div id="shop-modal">
+        <div id="shop-header">
+            <h2>Hunting Depot (50 Advanced Firearms Available)</h2>
+            <button id="shop-close" style="padding:6px 12px; background:#f44336; color:white; border:none; border-radius:4px; cursor:pointer;">X Close</button>
+        </div>
+        <div id="shop-items"></div>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // Game Variables
+    let gameState = {
+        money: 0,
+        kills: 0,
+        currentGunIdx: 0,
+        isScoped: false,
+        shopOpen: false,
+        deer: null,
+        particles: [],
+        flashTimer: 0
+    };
+
+    // Auto-generate 50 unique Guns with scaling prices and increasing Hitbox sizes
+    const guns = [];
+    const gunPrefixes = ["Recurve", "Varmint", "Scout", "Tracker", "Ranger", "Hunter", "Sniper", "Apex", "Viper", "Tactical", "Quantum", "Elite"];
+    const gunTypes = ["Rifle", "Carbine", "Longbow", "Precision Spec", "Eliminator"];
+
+    // Initialize Gun 0 as Starter Weapon
+    guns.push({ name: "Starter Air Rifle", price: 0, hitboxMod: 1.0, owned: true });
+    
+    for (let i = 1; i <= 52; i++) {
+        let pfx = gunPrefixes[(i - 1) % gunPrefixes.length];
+        let typ = gunTypes[(i - 1) % gunTypes.length];
+        let tier = Math.ceil(i / 5);
+        let price = Math.round(100 * Math.pow(1.18, i));
+        // Hitbox multiplier scales up linearly to make striking running targets vastly easier
+        let hitboxMod = parseFloat((1.0 + (i * 0.08)).toFixed(2)); 
+        
+        guns.push({
+            name: `${pfx} ${typ} Mk.${tier}`,
+            price: price,
+            hitboxMod: hitboxMod,
+            owned: false
+        });
+    }
+
+    // Mutation Pools
+    const mutations = [
+        { name: "None", weight: 75, multiplier: 1.0, color: "#8B5A2B" }, // Standard Deer Brown
+        { name: "Albino White", weight: 12, multiplier: 2.5, color: "#F5F5F0" },
+        { name: "Melanistic Black", weight: 8, multiplier: 3.5, color: "#222222" },
+        { name: "Piebald Patched", weight: 4.5, multiplier: 5.0, color: "#D2B48C" }, // Mixed spots
+        { name: "Mythical Golden Aura", weight: 0.5, multiplier: 15.0, color: "#FFD700" }
+    ];
+
+    class Deer {
+        constructor() {
+            // Decide movement states: 0 = Still, 1 = Walking, 2 = Running
+            this.state = Math.random() < 0.3 ? 0 : (Math.random() < 0.6 ? 1 : 2);
+            this.direction = Math.random() < 0.5 ? 1 : -1; // 1 = Right, -1 = Left
+            
+            // Random Base Sizing (Scale modifier between 0.6x and 1.6x)
+            this.sizeMod = parseFloat((0.6 + Math.random() * 1.0).toFixed(2));
+            
+            // Structure calculations based on base asset size
+            this.width = 110 * this.sizeMod;
+            this.height = 90 * this.sizeMod;
+            
+            // Position safely off screen or edge depending on spawn vector
+            this.x = this.direction === 1 ? -this.width : canvas.width + this.width;
+            this.y = canvas.height - 130 - (this.height) + (Math.random() * 30); // Random horizon offset
+
+            // Dynamic setup configuration based on state selection
+            this.setSpeedByState();
+
+            // Set Mutation Selection
+            let roll = Math.random() * 100;
+            let sum = 0;
+            this.mutation = mutations[0]; // Default fallback
+            for (let m of mutations) {
+                sum += m.weight;
+                if (roll <= sum) {
+                    this.mutation = m;
+                    break;
+                }
+            }
+
+            this.health = 100;
+            this.isAlerted = false; // Tracks if missed/hit but alive to toggle emergency Sprint Run
+        }
+
+        setSpeedByState() {
+            if (this.state === 0) this.speed = 0;
+            else if (this.state === 1) this.speed = (0.5 + Math.random() * 0.8) * this.direction;
+            else if (this.state === 2) this.speed = (2.5 + Math.random() * 1.5) * this.direction;
+        }
+
+        update() {
+            this.x += this.speed;
+            
+            // Subtle breathing or bounce animation loop if alive and moving
+            this.animCycle = (this.animCycle || 0) + (Math.abs(this.speed) * 0.1 + 0.05);
+
+            // Bounds checking validation to cycle out offscreen actors safely
+            if ((this.direction === 1 && this.x > canvas.width + 50) || 
+                (this.direction === -1 && this.x < -this.width - 50)) {
+                return false; // Safely flag removal
+            }
+            return true;
+        }
+
+        draw() {
+            ctx.save();
+            
+            // Handle directional image flipping natively via canvas scaling matrix
+            ctx.translate(this.x + this.width / 2, this.y + this.height / 2);
+            if (this.direction === -1) {
+                ctx.scale(-1, 1);
+            }
+
+            // Procedural Leg oscillation
+            let legWiggle = Math.sin(this.animCycle) * 12 * (this.state > 0 ? 1 : 0.1);
+            
+            ctx.fillStyle = this.mutation.color;
+            ctx.strokeStyle = "#332211";
+            ctx.lineWidth = 1.5;
+
+            // Render Back legs
+            ctx.fillRect(-this.width/3, 10, 8 * this.sizeMod, this.height/2);
+            ctx.fillRect(this.width/4, 10, 8 * this.sizeMod, this.height/2 + legWiggle);
+
+            // Draw Torso Main frame body
+            ctx.beginPath();
+            ctx.ellipse(0, 0, this.width/2, this.height/3.5, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+
+            // Render Front legs
+            ctx.fillRect(-this.width/4, 10, 8 * this.sizeMod, this.height/2 - legWiggle);
+            ctx.fillRect(this.width/3, 10, 8 * this.sizeMod, this.height/2);
+
+            // Neck & Head processing
+            ctx.beginPath();
+            ctx.moveTo(this.width/2 - 10, -5);
+            ctx.lineTo(this.width/2 + 15, -this.height/2);
+            ctx.lineTo(this.width/2 + 30, -this.height/2 + 5);
+            ctx.lineTo(this.width/2, 10);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            // Head block
+            ctx.beginPath();
+            ctx.ellipse(this.width/2 + 20, -this.height/2, 18 * this.sizeMod, 10 * this.sizeMod, 0.2, 0, Math.PI*2);
+            ctx.fill();
+            ctx.stroke();
+
+            // Tiny Ears
+            ctx.beginPath();
+            ctx.ellipse(this.width/2 + 10, -this.height/2 - 8, 5 * this.sizeMod, 10 * this.sizeMod, -0.2, 0, Math.PI*2);
+            ctx.fill();
+            ctx.stroke();
+
+            // Eye node definition
+            ctx.fillStyle = "#000";
+            ctx.beginPath();
+            ctx.arc(this.width/2 + 26, -this.height/2 - 2, 2.5, 0, Math.PI*2);
+            ctx.fill();
+
+            // Extra flair: Antlers for mutated/large deer targets
+            if (this.sizeMod > 1.0) {
+                ctx.strokeStyle = "#ddd";
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(this.width/2 + 12, -this.height/2 - 5);
+                ctx.lineTo(this.width/2 + 8, -this.height/2 - 25);
+                ctx.lineTo(this.width/2 + 18, -this.height/2 - 35);
+                ctx.moveTo(this.width/2 + 8, -this.height/2 - 25);
+                ctx.lineTo(this.width/2 - 2, -this.height/2 - 30);
+                ctx.stroke();
+            }
+
+            ctx.restore();
+
+            // Debug Hitboxes Only shown during developer assessment or explicit testing mode layout rules.
+            // Heart & Lung Vital Box is centered inside the chest mass natively.
+        }
+
+        // Return absolute bounding dimensions inside the current global frame coordinates
+        getVitalsBoundingBox() {
+            // Evaluates precise geographic zones regardless of flip matrices
+            let centerMassX = this.x + this.width / 2;
+            if (this.direction === 1) {
+                // Moving right, chest/vitals are forward biased
+                return {
+                    x: centerMassX + (10 * this.sizeMod),
+                    y: this.y + (this.height/3),
+                    w: 32 * this.sizeMod,
+                    h: 30 * this.sizeMod
+                };
+            } else {
+                // Moving left, chest/vitals are left-biased relative to tracking frame origin
+                return {
+                    x: centerMassX - (42 * this.sizeMod),
+                    y: this.y + (this.height/3),
+                    w: 32 * this.sizeMod,
+                    h: 30 * this.sizeMod
+                };
+            }
+        }
+
+        getBodyBoundingBox() {
+            return {
+                x: this.x,
+                y: this.y + 10,
+                w: this.width,
+                h: this.height - 20
+            };
+        }
+
+        alertAndRun() {
+            if (!this.isAlerted) {
+                this.isAlerted = true;
+                this.state = 2; // Transition straight to panicked sprint matrix
+                // Snap operational velocities up immediately
+                this.speed = 5.5 * this.direction;
+                showNotification("Target Alerted! Running away!");
+            }
+        }
+    }
+
+    class Particle {
+        constructor(x, y, color) {
+            this.x = x;
+            this.y = y;
+            this.vx = (Math.random() - 0.5) * 6;
+            this.vy = (Math.random() - 0.5) * 6 - 2;
+            this.alpha = 1.0;
+            this.color = color;
+            this.life = 30 + Math.random() * 20;
+        }
+        update() {
+            this.x += this.vx;
+            this.y += this.vy;
+            this.vy += 0.1; // Minor Gravity simulation element
+            this.alpha -= 1 / this.life;
+            return this.alpha > 0;
+        }
+        draw() {
+            ctx.save();
+            ctx.globalAlpha = this.alpha;
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, 3, 0, Math.PI*2);
+            ctx.fill();
+            ctx.restore();
+        }
+    }
+
+    // Initialize Game Engine Setup Elements
+    function init() {
+        spawnNewDeer();
+        buildShopUI();
+        updateHUD();
+
+        // Event Handling hooks
+        window.addEventListener('keydown', (e) => {
+            if (e.key.toLowerCase() === 'r') {
+                toggleScope();
+            }
+        });
+
+        canvas.addEventListener('mousedown', (e) => {
+            if (gameState.shopOpen) return;
+            // Native mapping of absolute click arrays onto bounding game window client sizes
+            const rect = canvas.getBoundingClientRect();
+            const clickX = (e.clientX - rect.left) * (canvas.width / rect.width);
+            const clickY = (e.clientY - rect.top) * (canvas.height / rect.height);
+            processShot(clickX, clickY);
+        });
+
+        // Setup Mobile controls natively binding interface touches directly inside standard operations
+        document.getElementById('mobile-scope-btn').addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            toggleScope();
+        });
+
+        document.getElementById('mobile-shoot-btn').addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (gameState.shopOpen) return;
+            // Shoot precisely center crosshair of screen if utilizing pure manual click simulation
+            processShot(canvas.width / 2, canvas.height / 2);
+        });
+
+        // UI Hookups
+        document.getElementById('shop-toggle').addEventListener('click', () => {
+            gameState.shopOpen = !gameState.shopOpen;
+            document.getElementById('shop-modal').style.display = gameState.shopOpen ? 'flex' : 'none';
+        });
+        document.getElementById('shop-close').addEventListener('click', () => {
+            gameState.shopOpen = false;
+            document.getElementById('shop-modal').style.display = 'none';
+        });
+
+        // Run primary engine execution frame
+        requestAnimationFrame(gameLoop);
+    }
+
+    function spawnNewDeer() {
+        gameState.deer = new Deer();
+    }
+
+    function toggleScope() {
+        gameState.isScoped = !gameState.isScoped;
+    }
+
+    function updateHUD() {
+        document.getElementById('hud-money').innerText = gameState.money;
+        document.getElementById('hud-kills').innerText = gameState.kills;
+        
+        let curGun = guns[gameState.currentGunIdx];
+        document.getElementById('hud-gun-name').innerText = curGun.name;
+        document.getElementById('hud-gun-hitbox').innerText = curGun.hitboxMod + "x";
+    }
+
+    function showNotification(msg) {
+        const p = document.getElementById('prompt-hud');
+        p.innerText = msg;
+        p.style.opacity = '1';
+        setTimeout(() => {
+            if(p.innerText === msg) p.style.opacity = '0';
+        }, 2500);
+    }
+
+    function buildShopUI() {
+        const container = document.getElementById('shop-items');
+        container.innerHTML = ''; // Fresh DOM compilation pass
+        
+        guns.forEach((gun, idx) => {
+            const item = document.createElement('div');
+            item.className = `shop-item ${gun.owned ? 'owned' : ''} ${gameState.currentGunIdx === idx ? 'equipped' : ''}`;
+            
+            item.innerHTML = `
+                <div>
+                    <strong>${gun.name}</strong><br>
+                    <small style="color:#aaa;">Hitbox Expansion Mod: +${Math.round((gun.hitboxMod - 1)*100)}% dynamic lock</small>
+                </div>
+                <div>
+                    ${gun.owned ? 
+                        (gameState.currentGunIdx === idx ? '<button disabled>EQUIPPED</button>' : `<button onclick="equipGun(${idx})">EQUIP</button>`) : 
+                        `<button class="buy-btn" onclick="buyGun(${idx})">BUY $${gun.price}</button>`
+                    }
+                </div>
+            `;
+            container.appendChild(item);
+        });
+    }
+
+    window.buyGun = function(idx) {
+        let gun = guns[idx];
+        if (gameState.money >= gun.price && !gun.owned) {
+            gameState.money -= gun.price;
+            gun.owned = true;
+            gameState.currentGunIdx = idx;
+            updateHUD();
+            buildShopUI();
+            showNotification(`Purchased & Equipped ${gun.name}!`);
+        } else {
+            showNotification("Insufficient hunting funds available!");
+        }
+    };
+
+    window.equipGun = function(idx) {
+        if (guns[idx].owned) {
+            gameState.currentGunIdx = idx;
+            updateHUD();
+            buildShopUI();
+            showNotification(`Equipped ${guns[idx].name}`);
+        }
+    };
+
+    function processShot(clientX, clientY) {
+        if (!gameState.deer) return;
+
+        gameState.flashTimer = 4; // Visual gunshot fire flash trigger countdown setup
+
+        let target = gameState.deer;
+        let weapon = guns[gameState.currentGunIdx];
+        
+        // Weapon modifier determines how forgiving the pixel-hit registration range calculations are
+        let radialTolerance = 16 * weapon.hitboxMod; 
+
+        let vitals = target.getVitalsBoundingBox();
+        let body = target.getBodyBoundingBox();
+
+        // High precision collision calculations tracking absolute point offset vectors modified dynamically by gun buffer zones
+        let hitVitals = checkCollisionWithTolerance(clientX, clientY, radialTolerance, vitals);
+        let hitBody = checkCollisionWithTolerance(clientX, clientY, radialTolerance, body);
+
+        if (hitVitals) {
+            // Heart/Lung Kill shot instant execution configuration
+            spawnBloodSpray(clientX, clientY, 25, '#ff0000');
+            processDeerKill(true);
+        } else if (hitBody) {
+            // Body damage hit - does not kill instantly but triggers running alert protocol sequence
+            spawnBloodSpray(clientX, clientY, 10, '#aa0000');
+            target.health -= 50;
+            
+            if (target.health <= 0) {
+                processDeerKill(false);
+            } else {
+                target.alertAndRun();
+            }
+        } else {
+            // Completely missed vector trajectory - alert the target to escape at top velocity
+            target.alertAndRun();
+        }
+    }
+
+    function checkCollisionWithTolerance(px, py, radius, rect) {
+        // Expand rectangular zone dimensions calculation based on calculated firearm structural configuration modifiers
+        let rx = rect.x - radius;
+        let ry = rect.y - radius;
+        let rw = rect.w + (radius * 2);
+        let rh = rect.h + (radius * 2);
+
+        return (px >= rx && px <= rx + rw && py >= ry && py <= ry + rh);
+    }
+
+    function spawnBloodSpray(x, y, count, color) {
+        for (let i = 0; i < count; i++) {
+            gameState.particles.push(new Particle(x, y, color));
+        }
+    }
+
+    function processDeerKill(isVitalShot) {
+        let deer = gameState.deer;
+        gameState.kills++;
+
+        // Evaluate core market value factoring size modifications and scaling factors from mutations
+        let baseValue = 45 * deer.sizeMod;
+        if (isVitalShot) baseValue += 25; // Bonus execution payout for precision hunting performance
+        
+        let finalValue = Math.round(baseValue * deer.mutation.multiplier);
+        gameState.money += finalValue;
+
+        showNotification(`Kill Confirmed! ${isVitalShot ? '[VITAL HEART SHOT] ' : ''}${deer.mutation.name} variant ($${finalValue})`);
+        
+        gameState.deer = null; // Flush instance clear out
+        updateHUD();
+        buildShopUI();
+
+        // Delay setup before spawning subsequent target sequence cycle loops automatically
+        setTimeout(() => {
+            if (!gameState.deer) spawnNewDeer();
+        }, 1500);
+    }
+
+    // Engine loop processing
+    function gameLoop() {
+        update();
+        render();
+        requestAnimationFrame(gameLoop);
+    }
+
+    function update() {
+        // Handle screen flash element step downs
+        if (gameState.flashTimer > 0) gameState.flashTimer--;
+
+        // Update target updates safely verified tracking
+        if (gameState.deer) {
+            let active = gameState.deer.update();
+            if (!active) {
+                showNotification("The deer got away out of bounds!");
+                spawnNewDeer();
+            }
+        }
+
+        // Particle logic loop filters
+        gameState.particles = gameState.particles.filter(p => p.update());
+    }
+
+    function render() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Draw sky background layer system
+        let skyGrad = ctx.createLinearGradient(0,0,0, canvas.height);
+        skyGrad.addColorStop(0, '#87CEEB');
+        skyGrad.addColorStop(0.6, '#B0E0E6');
+        skyGrad.addColorStop(1, '#E0F6FF');
+        ctx.fillStyle = skyGrad;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Draw distant hunting environment decorative element mountains
+        ctx.fillStyle = '#7799aa';
+        ctx.beginPath();
+        ctx.moveTo(0, canvas.height - 120);
+        ctx.lineTo(150, 200); ctx.lineTo(350, canvas.height - 120);
+        ctx.lineTo(600, 150); ctx.lineTo(850, canvas.height - 120);
+        ctx.fill();
+
+        // Draw Terrain floor setup
+        ctx.fillStyle = '#557a46';
+        ctx.fillRect(0, canvas.height - 130, canvas.width, 130);
+        // Foreground brush trim
+        ctx.fillStyle = '#3f5e33';
+        ctx.fillRect(0, canvas.height - 40, canvas.width, 40);
+
+        // Render Deer Instance
+        if (gameState.deer) {
+            gameState.deer.draw();
+        }
+
+        // Render Active dynamic particles
+        gameState.particles.forEach(p => p.draw());
+
+        // Process First person scope overlay transformation frameworks
+        if (gameState.isScoped) {
+            renderScopeOverlay();
+        }
+
+        // Fire gunshot screen flare flash render system execution
+        if (gameState.flashTimer > 0) {
+            ctx.fillStyle = `rgba(255, 255, 200, ${gameState.flashTimer * 0.22})`;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+    }
+
+    function renderScopeOverlay() {
+        let cx = canvas.width / 2;
+        let cy = canvas.height / 2;
+        let radius = 190;
+
+        ctx.save();
+
+        // Draw black masking borders out processing standard peripheral obstruction layout parameters
+        ctx.fillStyle = 'rgba(5, 12, 5, 0.82)';
+        
+        // Outer masking path configuration natively excluding inner optics path region
+        ctx.beginPath();
+        ctx.rect(0, 0, canvas.width, canvas.height);
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2, true);
+        ctx.closePath();
+        ctx.fill();
+
+        // Precision Crosshair Scope Sight lines rendering setup arrays
+        ctx.strokeStyle = '#111111';
+        ctx.lineWidth = 2.5;
+        
+        ctx.beginPath();
+        // Circular crosshair ring housing asset
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        // Fine crosshair coordinate mappings
+        ctx.moveTo(cx - radius, cy); ctx.lineTo(cx + radius, cy);
+        ctx.moveTo(cx, cy - radius); ctx.lineTo(cx, cy + radius);
+        ctx.stroke();
+
+        // Center reticle fine red point matrix
+        ctx.fillStyle = 'red';
+        ctx.beginPath();
+        ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+    }
+
+    // Launch application script runtime setup initialization
+    window.onload = init;
+</script>
+
+</body>
+</html>
